@@ -5,11 +5,18 @@ let accessToken = null;
 
 function setAccessToken(at) {
   accessToken = at;
-  setAuthToken(at); // actualizar header por defecto para api
+  setAuthToken(at); // actualizar header por defecto para api (axios)
 }
 
 function getAccessToken() {
   return accessToken;
+}
+
+// --- Al cargar el provider, intenta recuperar token guardado en localStorage ---
+const existingToken = localStorage.getItem('token');
+if (existingToken) {
+  // sincroniza memoria + axios header
+  setAccessToken(existingToken);
 }
 
 async function login(credenciales) {
@@ -23,23 +30,25 @@ async function login(credenciales) {
     const resp = await api.post('/auth/login', payload);
     const data = resp.data;
 
-    // Guardar tokens
-    if (data.accessToken) {
-      setAccessToken(data.accessToken);
+    // Guardar tokens (compatibilidad con accessToken o token)
+    const token = data.accessToken || data.token;
+    if (token) {
+      setAccessToken(token);                 // guarda en memoria + setAuthToken() actualiza headers
+      localStorage.setItem('token', token);  // persiste para recargas
     }
+
     if (data.refreshToken) {
-      // opcional: guardar refresh token (menos seguro que cookie HttpOnly)
       localStorage.setItem('refreshToken', data.refreshToken);
     }
 
-    // Si quieres, pide info de usuario /auth/me aquí (si tu backend lo expone)
+    // Opcional: pedir /auth/me si quieres obtener datos de usuario
     // const me = await api.get('/auth/me');
 
     return {
       exito: true,
       datos: {
         mensaje: 'Login exitoso',
-        usuario: { email: credenciales.email }, // puedes cambiar si pides /auth/me
+        usuario: { email: credenciales.email }, // puedes reemplazar con me.data si pides /auth/me
         raw: data
       }
     };
@@ -56,8 +65,12 @@ async function refreshAccessToken() {
     if (!rt) throw new Error('No hay refresh token');
 
     const resp = await api.post('/auth/refresh', { refreshToken: rt });
-    const newAt = resp.data.accessToken;
+    const newAt = resp.data.accessToken || resp.data.token;
+
+    if (!newAt) throw new Error('No se recibió nuevo accessToken');
+
     setAccessToken(newAt);
+    localStorage.setItem('token', newAt); // actualizar persistencia
     return newAt;
   } catch (err) {
     console.error('refresh failed', err);
@@ -84,6 +97,7 @@ async function logout() {
   } finally {
     setAccessToken(null);
     localStorage.removeItem('refreshToken');
+    localStorage.removeItem('token');
   }
 }
 

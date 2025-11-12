@@ -109,29 +109,33 @@
           
           <!-- Contenido inferior con botones y precio -->
           <div class="card-bottom">
-            
-            <!-- 1. Botón de Carrito (Estético) -->
-            <div class="cart-button-placeholder">
-              <!-- Icono de carrito (usando SVG) -->
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="9" cy="21" r="1"></circle>
-                <circle cx="20" cy="21" r="1"></circle>
-                <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
-              </svg>
-            </div>
-            
-            <!-- 2. Enlace "Ver más" (Rectángulo Naranja) -->
-            <div class="product-price-and-link">
-                <!-- Rectángulo Naranja con enlace -->
-                <a @click.prevent="openModal(product)" href="#" class="view-more-link">
-                    Ver más
-                </a>
-                
-                <div class="product-price">{{ formatPrice(product.precio) }}</div>
-            </div>
 
-          </div>
-        </div>
+  <!-- 1. Botón de Carrito -->
+  <button
+    class="cart-button"
+    :disabled="addingByProduct[product.id ?? product.id_producto]"
+    @click="addToCart(product)"
+    :aria-label="`Añadir ${product.nombre} al carrito`"
+    :title="`Añadir ${product.nombre} al carrito`"
+    :aria-busy="addingByProduct[product.id ?? product.id_producto] ? 'true' : 'false'"
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="9" cy="21" r="1"></circle>
+      <circle cx="20" cy="21" r="1"></circle>
+      <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+    </svg>
+
+    <!-- loader pequeño accesible -->
+    <span v-if="addingByProduct[product.id ?? product.id_producto]" class="sr-only">Añadiendo...</span>
+  </button>
+
+  <!-- 2. Enlace "Ver más" -->
+  <div class="product-price-and-link">
+    <a @click.prevent="openModal(product)" href="#" class="view-more-link">Ver más</a>
+    <div class="product-price">{{ formatPrice(product.precio) }}</div>
+  </div>
+
+</div>        </div>
         
         <p v-if="!loading && !filteredProducts.length" class="text-gray-500 italic col-span-2">
           No hay productos disponibles para esta marca.
@@ -177,24 +181,17 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, reactive } from 'vue'; // añadí reactive
 import axios from 'axios';
 import authProvider from '@/providers/authProvider.js';
 import { useRouter } from 'vue-router';
 
-// Estado de la Modal
+// ---------- Estado y constantes ----------
 const productDetail = ref(null);
-
-// NUEVO: Estado para el menú de usuario
 const isUserMenuOpen = ref(false);
-
-// NUEVO: Estado para el modal de confirmación de logout
 const showLogoutConfirm = ref(false);
-
 const showCatalog = ref(false);
 const selectedBrand = ref(null);
-
-const isOpen = computed(() => showCatalog.value || !!selectedBrand.value);
 
 const brands = ref([
   { id: 1, nombre: 'Nike' },
@@ -206,13 +203,22 @@ const filteredProducts = ref([]);
 const loading = ref(false);
 const error = ref(null);
 
-const API_BASE = 'http://localhost:8080';
+// estado por producto (reactivo) - evita llamadas duplicadas al hacer click muchas veces
+const addingByProduct = reactive({});
+
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080';
+
+const router = useRouter();
+
+// ---------- Computeds ----------
+const isOpen = computed(() => showCatalog.value || !!selectedBrand.value);
 
 const displayBrandName = computed(() => {
   if (!selectedBrand.value) return '';
   return selectedBrand.value.nombre ?? selectedBrand.value;
 });
 
+// ---------- Utilidades ----------
 function formatPrice(value) {
   if (value == null) return '-';
   const num = typeof value === 'string' ? parseFloat(value) : value;
@@ -220,6 +226,7 @@ function formatPrice(value) {
   return num.toLocaleString('es-CO', { style: 'currency', currency: 'COP' });
 }
 
+// ---------- Modal producto ----------
 function openModal(product) {
   productDetail.value = product;
 }
@@ -228,41 +235,37 @@ function closeModal() {
   productDetail.value = null;
 }
 
+// ---------- Menú usuario / logout ----------
 function toggleUserMenu() {
   isUserMenuOpen.value = !isUserMenuOpen.value;
 }
 
 function openLogoutConfirm() {
   showLogoutConfirm.value = true;
-  isUserMenuOpen.value = false; // Cierra el menú desplegable al abrir el modal
+  isUserMenuOpen.value = false;
 }
 
 function closeLogoutConfirm() {
   showLogoutConfirm.value = false;
 }
 
-const router = useRouter();
-
-
 async function confirmLogout() {
   try {
     await authProvider.logout();
   } catch (err) {
-
+    console.warn('Logout error', err);
   } finally {
-    // cerrar UI y redirigir
     showLogoutConfirm.value = false;
     isUserMenuOpen.value = false;
-
     try {
       await router.replace('/');
     } catch (e) {
-      // fallback a push si replace falla
       router.push('/');
     }
   }
 }
 
+// ---------- Catalog / marcas ----------
 function handleCatalogClick() {
   if (selectedBrand.value) {
     selectedBrand.value = null;
@@ -272,11 +275,19 @@ function handleCatalogClick() {
   }
 }
 
+function backToBrands() {
+  selectedBrand.value = null;
+  filteredProducts.value = [];
+}
+
+// ---------- Carga de productos por marca ----------
 async function selectBrand(brand) {
   selectedBrand.value = brand;
   loading.value = true;
   error.value = null;
   filteredProducts.value = [];
+
+  console.log('selectBrand ->', brand, 'API_BASE:', API_BASE);
 
   try {
     let response;
@@ -289,11 +300,30 @@ async function selectBrand(brand) {
       });
     }
 
-    filteredProducts.value = Array.isArray(response.data) ? response.data : [];
+    // Normalizar respuesta a array de productos
+    const raw = response?.data;
+    let arr = [];
+    if (Array.isArray(raw)) arr = raw;
+    else if (Array.isArray(raw?.productos)) arr = raw.productos;
+    else if (Array.isArray(raw?.content)) arr = raw.content;
+    else if (raw == null) arr = [];
+    else arr = Array.isArray(raw) ? raw : [];
+
+    // Opcional: normalizar id (id_producto -> id)
+    filteredProducts.value = arr.map(p => ({
+      id: p.id ?? p.id_producto,
+      nombre: p.nombre,
+      descripcion: p.descripcion,
+      precio: p.precio,
+      ...p
+    }));
+
+    console.log('selectBrand -> productos cargados:', filteredProducts.value.length);
   } catch (err) {
     console.error('Error al cargar productos:', err);
     if (err.response) {
       error.value = `Error ${err.response.status}: ${err.response.data?.message ?? 'Error del servidor'}`;
+      console.log('err.response.data', err.response.data);
     } else if (err.request) {
       error.value = 'No se recibió respuesta del servidor. ¿Está corriendo el backend?';
     } else {
@@ -302,15 +332,140 @@ async function selectBrand(brand) {
     filteredProducts.value = [];
   } finally {
     loading.value = false;
+    console.log('selectBrand -> finished (loading false)');
   }
 }
 
-function backToBrands() {
-  selectedBrand.value = null;
-  filteredProducts.value = [];
+// ---------- Helpers para userId ----------
+async function getCurrentUserId() {
+  try {
+    // 1) authProvider.getCurrentUser (si existe)
+    if (authProvider?.getCurrentUser) {
+      const u = await authProvider.getCurrentUser();
+      if (u?.id) return u.id;
+      if (u?.usuario?.id) return u.usuario.id;
+    }
+
+    // 2) authProvider.user
+    if (authProvider?.user) {
+      const u = authProvider.user;
+      if (u?.id) return u.id;
+    }
+
+    // 3) localStorage con claves comunes
+    const keys = ['user', 'currentUser', 'auth_user'];
+    for (const k of keys) {
+      const raw = localStorage.getItem(k);
+      if (raw) {
+        try {
+          const obj = JSON.parse(raw);
+          if (obj?.id) return obj.id;
+          if (obj?.user?.id) return obj.user.id;
+        } catch (e) {}
+      }
+    }
+
+    // 4) token JWT en localStorage
+    const token = localStorage.getItem('token') || localStorage.getItem('access_token') || localStorage.getItem('jwt');
+    if (token) {
+      const parts = token.split('.');
+      if (parts.length >= 2) {
+        try {
+          const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+          if (payload?.id) return payload.id;
+          if (payload?.sub) return payload.sub;
+          if (payload?.userId) return payload.userId;
+        } catch (e) {}
+      }
+    }
+  } catch (err) {
+    console.warn('getCurrentUserId fallback error', err);
+  }
+  return null;
 }
-</script>
-<style scoped>
+
+// ---------- Helpers para bloqueo por producto ----------
+function setAdding(productId, state) {
+  if (productId == null) return;
+  addingByProduct[productId] = state;
+}
+
+// ---------- Lógica para añadir al carrito ----------
+/**
+ * Flujo:
+ * 1) Obtener userId
+ * 2) Buscar carrito pendiente del usuario: GET /carrito/all/usuario?usuarioId=...
+ * 3) Si no existe, POST /carrito/create/usuario { usuario:{id}, estado:{id:1} }
+ * 4) POST /detallecarrito/addOrUpdate { carritoId, productoId, cantidad:1 }
+ */
+async function addToCart(product) {
+  const productoId = product.id ?? product.id_producto;
+  if (!productoId) {
+    console.warn('Producto sin id:', product);
+    alert('Producto inválido.');
+    return;
+  }
+
+  if (addingByProduct[productoId]) return; // bloqueo por producto
+  setAdding(productoId, true);
+
+  try {
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      alert('Debes iniciar sesión para agregar productos al carrito.');
+      return;
+    }
+
+    // 1) Obtener carritos del usuario
+    const res = await axios.get(`${API_BASE}/carrito/all/usuario`, {
+      params: { usuarioId: userId }
+    });
+    const carritos = Array.isArray(res.data) ? res.data : (Array.isArray(res.data?.carritos) ? res.data.carritos : []);
+
+    // 2) Buscar carrito pendiente (estado id === 1 o nombre 'pendiente')
+    let carritoPendiente = carritos.find(c => {
+      const est = c?.estado;
+      return est && (est.id === 1 || (est.nombre && est.nombre.toLowerCase() === 'pendiente'));
+    });
+
+    // 3) Si no existe, crear carrito con estado id=1 (Pendiente)
+    if (!carritoPendiente) {
+      const createBody = {
+        usuario: { id: userId },
+        estado: { id: 1 }
+      };
+      const createRes = await axios.post(`${API_BASE}/carrito/create/usuario`, createBody);
+      carritoPendiente = createRes.data;
+    }
+
+    const carritoId = carritoPendiente?.id;
+    if (!carritoId) throw new Error('No se pudo obtener/crear el carrito pendiente.');
+
+    // 4) Añadir o actualizar detalle (cantidad 1)
+    const detalleBody = {
+      carritoId,
+      productoId,
+      cantidad: 1
+    };
+    const detalleRes = await axios.post(`${API_BASE}/detallecarrito/addOrUpdate`, detalleBody);
+
+    console.log('addToCart -> detalleRes:', detalleRes?.data);
+    // feedback al usuario (reemplazar por toast si prefieres)
+    alert(`${product.nombre} añadido al carrito.`);
+  } catch (err) {
+    console.error('Error al añadir al carrito:', err);
+    if (err?.response?.data?.message) {
+      alert(`Error: ${err.response.data.message}`);
+    } else if (err?.response) {
+      alert(`Error ${err.response.status}: ${JSON.stringify(err.response.data)}`);
+    } else {
+      alert('Error al añadir el producto al carrito. Revisa la consola.');
+    }
+  } finally {
+    setAdding(productoId, false);
+  }
+}
+</script><style scoped>
 
 .user-profile-container {
   position: fixed;
